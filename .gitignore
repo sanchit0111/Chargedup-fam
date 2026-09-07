@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+models/
+# Large public download, reproducible from the URL documented in
+# data/raw/PHASE1_FINDINGS.md — not worth tracking in git.
+data/raw/icrisat_dld_1990_2015.xls
+demo/cached
+projects/hackathon/models
+data/
+# GEE service-account key material — never commit. Its contents live in .env
+# (GEE_SERVICE_ACCOUNT_JSON) instead; these loose files are just the original download.
+configs/hackathon-*.json
+configs/hackathon-*.p12

@@ -1,0 +1,131 @@
+# Phase 1 spike (2026-08-24) + crop pivot to Rice (2026-08-24) + district-agnostic pivot
+# (2026-08-24, see data/raw/PHASE1_FINDINGS.md addenda) — all verified live, not guessed.
+# Single source of truth (skills.md §3). Do not hardcode any of these values anywhere in src/.
+#
+# ARCHITECTURE: models are crop-specific but location-agnostic. Fertility and Survival (Phases
+# 6a/6b) are fit once from `training_district_pool` (a panel across many districts growing this
+# crop) and then evaluated at *any* lat/lon via location-derived features (soil, weather) — not a
+# lookup of one district's own remembered history. This replaced an earlier single-district design
+# after exhausting per-district feature engineering (see git history / prior session): the real
+# constraint was never "wrong feature," it was N=25 (one district's years). Pooling ~8 districts
+# gives a real panel (~150-200 district-year rows) instead.
+
+crop: "Rice"
+
+# Default/demo location only — NOT what Fertility/Survival are fit on. Used by predict.py's
+# __main__ demo and tests that need *a* concrete point. The fitted models generalize beyond this.
+default_district: "Bellary"
+default_state: "Karnataka"
+centroid:
+  lat: 15.14
+  lon: 76.92
+
+season:
+  # {year} is substituted with the season_year being scored/trained on. Kharif rice: transplanted
+  # with/soon after monsoon onset, ~130-day duration for a modern semi-dwarf variety (general
+  # default, not variety-specific — applied uniformly across the pool, a real simplification since
+  # actual sowing timing varies somewhat by district/agro-climatic zone).
+  sowing_date_template: "{year}-06-15"
+  season_length_days: 130
+
+# Hard temporal cutoff (execution.md §0 constraint 2): number of days after sowing at which the
+# model is allowed to score a loan. No ingestion function may use data dated after this point.
+scoring_cutoff_days_after_sowing: 60
+
+# Phenological stages, in days-after-sowing — general agronomic convention, NOT a verified
+# variety-specific citation (same honesty caveat as weather.py's HEAT_STRESS_THRESHOLD_C). Keys
+# are deliberately crop-agnostic ("critical_stage", not e.g. groundnut's "flowering_pegging") so
+# switching crops only means changing these boundaries, not renaming code.
+growth_stages:
+  vegetative: [0, 45]
+  critical_stage: [45, 60]
+
+ground_truth:
+  source: "icrisat_yield_shortfall"
+  # ICRISAT District-Level Database (unapportioned), 1990-2015. Static file mirror used instead
+  # of the live ICRISAT DLD portal — see PHASE1_FINDINGS.md.
+  file: "data/raw/icrisat_dld_1990_2015.xls"
+  # Lower than Groundnut's 0.20 deliberately: Rice's yield-vs-trailing-trend series never dips
+  # more than ~11% below its own trend at Bellary (checked 2026-08-24) — a 20% threshold labels
+  # every season "no stress," which isn't a meaningful proxy label. Applied uniformly across the
+  # pool; not re-verified per pooled district (a known simplification, not hidden). Only used by
+  # build_labels() (reporting, default crop only) — not by the multi-crop compare_crops() path.
+  stress_threshold: 0.05 # yield >5% below trailing 5-year trend = stress label
+
+# Multi-crop registry (2026-09-07) — bridges two data providers' different crop-naming, verified
+# live per crop before inclusion (same discipline as the district/data checks above), not guessed:
+#   icrisat_yield_column: this crop's column in ground_truth.file.
+#   agmarknet_commodity: the literal Commodity string data.gov.in's Agmarknet resource uses for
+#     this crop — differs from the canonical name for Chickpea/Pearl Millet. `null` means verified
+#     UNAVAILABLE (see note), not merely untried.
+# Sugarcane has real ICRISAT yield data but zero Agmarknet records under "Sugarcane" for Bellary
+# (verified 2026-09-07) — cane sells to mills under contract, not through mandi auctions; only its
+# processed form ("Gur(Jaggery)", 1546 records) trades on-mandi, and converting cane yield to a
+# jaggery-price revenue estimate needs a cane-to-jaggery conversion ratio this project has no
+# sourced number for. Excluded from compare_crops() rather than guessing that ratio.
+crops:
+  Rice:
+    icrisat_yield_column: "RICE YIELD (Kg per ha)"
+    agmarknet_commodity: "Rice"
+  Groundnut:
+    icrisat_yield_column: "GROUNDNUT YIELD (Kg per ha)"
+    agmarknet_commodity: "Groundnut"
+  Chickpea:
+    icrisat_yield_column: "CHICKPEA YIELD (Kg per ha)"
+    agmarknet_commodity: "Bengal Gram(Gram)(Whole)"
+  Pearl Millet:
+    icrisat_yield_column: "PEARL MILLET YIELD (Kg per ha)"
+    agmarknet_commodity: "Bajra(Pearl Millet/Cumbu)"
+  Sugarcane:
+    icrisat_yield_column: "SUGARCANE YIELD (Kg per ha)"
+    agmarknet_commodity: null # verified unavailable — see note above, not excluded by omission
+
+# Crops compare_crops() actually loops over — Sugarcane deliberately left out (agmarknet_commodity
+# is null). Only Rice has a fitted Survival model (models/survival_coefficients.json); the other
+# three get a normal-year baseline (Fertility x Price, survival_factor fixed at 1.0), labeled as
+# such in the output — see src/model/predict.py's compare_crops().
+comparable_crops: ["Rice", "Groundnut", "Chickpea", "Pearl Millet"]
+
+# The panel used to FIT Fertility (src/model/train_fertility.py) and Survival
+# (src/model/train_survival.py) — district-year rows pooled across all of these, not one district.
+# Picked for real diversity, not just biggest rice area: mixes irrigation regimes (Tungabhadra
+# canal: Bellary/Raichur/Koppal; Cauvery canal: Mandya/Mysore; Bhadra canal: Davanagere; rainfed
+# coastal monsoon: Udupi; mixed/rainfed north Karnataka: Dharwad) — deliberately not all
+# canal-irrigated, since pooling only irrigation-buffered districts would repeat the same
+# weather-signal-suppression problem observed at Bellary alone. Coordinates geocoded live via
+# Nominatim/OpenStreetMap (2026-08-24), not guessed. ICRISAT rice-yield data quality (no zero/
+# near-zero-area artifacts) checked for each before inclusion — see PHASE1_FINDINGS.md.
+training_district_pool:
+  - name: "Bellary"
+    lat: 15.14
+    lon: 76.92
+  - name: "Raichur"
+    lat: 16.0547
+    lon: 76.9004
+  - name: "Koppal"
+    lat: 15.5748
+    lon: 76.3118
+  - name: "Mandya"
+    lat: 12.6369
+    lon: 76.7275
+  - name: "Mysore"
+    lat: 12.1968
+    lon: 76.6120
+  - name: "Davanagere"
+    lat: 14.2559
+    lon: 75.8303
+  - name: "Udupi"
+    lat: 13.5270
+    lon: 74.8732
+  - name: "Dharwad"
+    lat: 15.3707
+    lon: 75.1333
+
+ndvi:
+  historical_baseline_years: 5
+
+data_gov_in:
+  # "Variety-wise Daily Market Prices Data of Commodity" (Agmarknet, via data.gov.in). Queried
+  # per-request with whatever district the loan application actually names — this resource id is
+  # shared across all districts, not pool-specific.
+  agmarknet_resource_id: "35985678-0d79-46b4-9ed6-6f13308a1d24"
